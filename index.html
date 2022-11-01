@@ -1,0 +1,190 @@
+﻿<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8"/>
+		<title>WebGL Example</title>
+		
+		<script id="vertex-shader" type="x-shader/x-vertex">#version 300 es
+			
+			in vec4 vPosition;
+			in vec3 vNormal;
+
+			uniform mat4 modelMatrix;
+			uniform mat4 viewMatrix;
+			uniform mat4 projectionMatrix;
+
+			uniform vec3 lightPosition;
+			
+			uniform vec4 Ia;
+			uniform vec4 Id;
+			uniform vec4 Is;
+			uniform vec4 ka;
+			uniform vec4 kd; 
+			uniform vec4 ks;
+			uniform float specExp;
+			
+			const float c1 = 1.0;
+			const float c2 = 0.0005;
+			const float c3 = 0.000003;
+
+			out vec4 vfColor;
+
+			void main()
+			{
+				mat4 modelViewMatrix = viewMatrix * modelMatrix;
+				mat4 normalMatrix = inverse(transpose(modelViewMatrix));
+
+				vec4 position = modelViewMatrix * vPosition;
+				vec4 normal = normalMatrix * vec4(vNormal, 0.0);
+				vec4 lightPos = viewMatrix * vec4(lightPosition, 1.0);
+				
+				vec3 N = normalize(normal.xyz);
+				vec3 L = normalize((lightPos - position).xyz);
+				vec3 V = normalize((-position).xyz);
+				vec3 R = reflect(-L, N);
+
+				float d = distance(lightPos, position);
+				float fAtt = min(1.0/(c1 + c2 * d + c3 * pow(d, 2.0)), 1.0);
+
+				vec4 I 	= Ia * ka 
+						+ fAtt * (Id * kd * max(dot(N, L), 0.0) 
+						+ Is * ks * pow(max(dot(R, V), 0.0), specExp));
+				vfColor = vec4(I.xyz, 1.0);
+				
+				gl_Position = projectionMatrix * position;
+			}
+		</script>
+		<script id="fragment-shader" type="x-shader/x-fragment">#version 300 es
+			precision mediump float;
+			
+			in vec4 vfColor;
+			out vec4 fColor;
+
+			void main()
+			{
+				fColor = vfColor;
+			}
+		</script>
+
+		<script id="vertex-shader-water" type="x-shader/x-vertex">#version 300 es
+			
+			in vec4 vPosition;
+			in vec3 vNormal;
+			in vec2 vTexCoord;
+
+			uniform mat4 modelMatrix;
+			uniform mat4 viewMatrix;
+			uniform mat4 projectionMatrix;
+
+			uniform vec3 lightPosition;
+
+			// TODO 2.2: Füge Timer als uniforme Variable hinzu.
+			uniform float timeStamp;
+
+			out vec4 positionCam;
+			out vec4 normalCam;
+			out vec4 lightPosCam;
+
+			out vec2 vfTexCoord;
+
+			void main()
+			{
+				// TODO 2.1: Berechne in y-Richtung verschobenen Vertex anhand von Sinus-/Cosinusfunktion.
+				vec4 newPosition = vPosition;
+				float a = 0.1;  // Streckung/Stauchung in y-Richtung
+				float b = 1.0;  // Streckung/Stauchung in x-Richtung
+				float c = 1.0 + (timeStamp / 500.0);  // Verschiebung entlang der x-Achse
+				float d = -0.2;  // Verschiebung entlang der y-Achse
+				newPosition.y = a * sin(b * newPosition.x + c) + d;
+
+				// TODO 2.5: Berechne neue Normale (Tipps werden in der Übung am 24.1. gegeben).
+				float epsilon = 0.1;
+				vec3 tangente = vec3(newPosition.x + epsilon, newPosition.yz) - newPosition.xyz;
+				vec3 binormale = vec3(newPosition.xy, newPosition.z + epsilon) - newPosition.xyz;
+
+				vec3 newNormal = normalize(cross(binormale, tangente));
+
+				mat4 modelViewMatrix = viewMatrix * modelMatrix;
+				mat4 normalMatrix = inverse(transpose(modelViewMatrix));
+
+				// TODO 2.6: Passe die folgenden zwei Zeilen so an, dass die !verschobene! Vertexposition und -normale in Kamerakoordinaten überführt werden.
+				positionCam = modelViewMatrix * newPosition;
+				
+				normalCam = normalMatrix * vec4(newNormal, 0.0);
+				//normalCam = newNormal * vec4(vNormal, 0.0);
+				//normalCam = normalMatrix * vec4(vNormal, 0.0);
+
+				lightPosCam = viewMatrix * vec4(lightPosition, 1.0);
+
+				gl_Position = projectionMatrix * positionCam;
+
+				vfTexCoord = vTexCoord;
+			}
+		</script>
+		<script id="fragment-shader-water" type="x-shader/x-fragment">#version 300 es
+			precision mediump float;
+			
+			in vec4 positionCam;
+			in vec4 normalCam;
+			in vec4 lightPosCam;
+
+			in vec2 vfTexCoord;
+			
+			uniform vec4 Ia;
+			uniform vec4 Id;
+			uniform vec4 Is;
+			uniform vec4 ka;
+			uniform vec4 kd; 
+			uniform vec4 ks;
+			uniform float specExp;
+			
+			const float c1 = 1.0;
+			const float c2 = 0.0005;
+			const float c3 = 0.000003;
+
+			uniform sampler2D diffuseMap;
+			uniform sampler2D normalMap;
+
+			out vec4 fColor;
+
+			void main()
+			{
+				vec3 n = normalize(normalCam.xyz);	
+				vec3 t = normalize(cross(n, vec3(0.0, 0.0, 1.0)));
+				vec3 b = cross(n, t);
+
+				mat3 tbn = mat3(t, b, n);
+
+				// Calculate and normalize N, L, V and R
+				vec3 N = normalize(tbn * (texture(normalMap, vfTexCoord).xyz * 2.0 - 1.0));
+				vec3 L = normalize((lightPosCam - positionCam).xyz);
+				vec3 V = normalize((-positionCam).xyz);
+				vec3 R = reflect(-L, N);
+
+				float d = distance(lightPosCam, positionCam);
+				float fAtt = min(1.0/(c1 + c2 * d + c3 * pow(d, 2.0)), 1.0);
+
+				vec4 diffuseColor = texture(diffuseMap, vfTexCoord);
+				//vec4 diffuseColor = vec4(.0,.0,.0,1.0);
+
+				vec4 I 	= Ia * ka 
+						+ fAtt * (Id * diffuseColor * max(dot(N, L), 0.0) 
+						+ Is * ks * pow(max(dot(R, V), 0.0), specExp));
+				fColor = vec4(I.xyz, 1.0);
+			}
+		</script>
+
+		<script type="text/javascript" src="common/initShaders.js"></script>
+		<script type="text/javascript" src="common/gl-matrix.js"></script>
+		<script type="text/javascript" src="common/objects3D.js"></script>
+	</head>
+	<body>
+		<h1>Lorem Ipsum</h1>
+
+		<canvas id="gl-canvas" width="1024" height="512">
+			If you see this, your browser doesn't support WebGL.
+		</canvas>
+		
+		<script src="main.js" type="text/javascript"></script>	
+	</body>
+</html>
